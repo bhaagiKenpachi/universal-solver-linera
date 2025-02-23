@@ -43,7 +43,7 @@ export default function Home() {
     } else {
       // Store the sandbox ID in localStorage
       sandbox = await sdk.sandbox.create({
-        template: 'ej14tt'
+        template: 'rk69p3'
       });
 
       localStorage.setItem('sandboxId', sandbox.id);
@@ -57,12 +57,14 @@ export default function Home() {
       // const files = (event.target as HTMLInputElement).files;
       if (files) {
         for (const [path, { content }] of Object.entries(files)) {
+
+          console.log(path)
           await sandbox.fs.writeTextFile(path, content);
         }
 
         console.log("files uploaded to sandbox")
 
-        const command = sandbox.shells.run(``);
+        const command = sandbox.shells.run(`cargo build --release --target wasm32-unknown-unknown`);
         command.onOutput((output) => {
           console.log(output);
         });
@@ -127,16 +129,15 @@ export default function Home() {
           console.warn(`Failed to fetch ${file.path}: ${fileRes.status}`);
           continue;
         }
-        const content = await fileResp.text();
-        // Use the GitHub path as key; CodeSandbox expects an object with "content" property
-        files[item.path] = { content };
-      } else if (item.type === 'dir') {
-        // Recursively fetch subdirectory
-        const subFiles = await fetchDirectory(owner, repo, item.path, branch);
-        files = { ...files, ...subFiles };
+        const fileData = await fileRes.json();
+        // Decode the Base64 content (the API returns content with line breaks, so remove them)
+        const content = atob(fileData.content.replace(/\n/g, ''));
+        filesObject.files[file.path] = { content };
       }
+      return filesObject.files
+    } catch (err) {
+      setError(err.message);
     }
-    return files;
   }
 
   async function uploadToCodeSandbox() {
@@ -145,13 +146,15 @@ export default function Home() {
     try {
       // Set repository details based on your URL:
       // https://github.com/dojimanetwork/linera-integration-demo/tree/improve-http-request-system-api/examples/universal-solver
-      const owner = 'dojimanetwork';
-      const repo = 'linera-integration-demo';
-      const folderPath = 'examples/universal-solver';
+
+      const owner = 'bhaagiKenpachi';
+      const repo = 'universal-solver-linera';
+      const path = 'examples/universal-solver';
       const branch = 'improve-http-request-system-api';
+      const apiUrl = `https://api.github.com/repos/${owner}/${repo}?ref=${branch}`;
 
       // Recursively fetch files from the given folder
-      const files = await fetchDirectory(owner, repo, folderPath, branch);
+      const files = await fetchDirectory(owner, repo, branch);
       console.log(files)
       await pushToCodeSandbox(files);
 
@@ -185,7 +188,7 @@ export default function Home() {
       ) : (
           <p>Loading files...</p>
       )}
-      <button onClick={ async () => await fetchGithubFiles(githubUrl)}>Submit</button>
+      {/*<button onClick={ async () => await fetchGithubFiles(githubUrl)}>Submit</button>*/}
       <button onClick={uploadToCodeSandbox}>Start CodeSandbox</button>
       
     </>
