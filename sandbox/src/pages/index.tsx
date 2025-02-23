@@ -28,30 +28,8 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
-  const fetchGithubFiles = async (url: string) => {
-
-    const owner = 'dojimanetwork';
-    const repo = 'linera-integration-demo';
-    const path = 'examples/universal-solver';
-    const branch = 'improve-http-request-system-api';
-    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
-
-    try {
-      const response = await fetch(apiUrl);
-      if (!response.ok) {
-        throw new Error(`GitHub API returned status ${response.status}`);
-      }
-      const data = await response.json();
-      setFiles(data);
-      console.log("Fetched files:", data);
-      // You can process the files as needed here
-    } catch (error) {
-      console.error("Error:", (error as Error).message);
-    }
-  };
-
   const pushToCodeSandbox = async (files: ProjectFiles) => {
-    const sdk = new CodeSandbox("csb_v1_Wl0js3HQFQFRwznrIRib7jZKbidc8Ec6dN2SCLXCMAY");
+    const sdk = new CodeSandbox(process.env.NEXT_PUBLIC_CODESANDBOX_TOKEN);
     // const sandbox = await sdk.sandbox.create({
     //   template: 'ej14tt'
     // });
@@ -101,21 +79,53 @@ export default function Home() {
 
 
   // Recursively fetch directory contents from GitHub
-  async function fetchDirectory(owner: string, repo: string, path: string, branch: string) {
-    const url = `https://api.github.com/repos/${owner}/${repo}/contents/${path}?ref=${branch}`;
-    const response = await fetch(url);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch ${url}: ${response.statusText}`);
-    }
-    const items = await response.json();
-    let files = {};
-    // Loop through all items in this directory
-    for (const item of items) {
-      if (item.type === 'file') {
-        // Get file content from the download URL
-        const fileResp = await fetch(item.download_url);
-        if (!fileResp.ok) {
-          throw new Error(`Failed to fetch file ${item.path}: ${fileResp.statusText}`);
+  async function fetchDirectory(owner: string, repo: string, branch: string): Promise<ProjectFiles> {
+    try {
+      // Repository details
+      const owner = 'bhaagiKenpachi';
+      const repo = 'universal-solver-linera';
+      const branch = 'main';
+      const token = process.env.NEXT_PUBLIC_GITHUB_TOKEN
+      console.log(token)
+      // Get branch info to retrieve the tree SHA
+      const branchRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/branches/${branch}`, {
+        headers: {
+          'Authorization': `token ${token}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      });
+      if (!branchRes.ok) throw new Error(`Failed to fetch branch: ${branchRes.status}`);
+      const branchData = await branchRes.json();
+      const treeSha = branchData.commit.commit.tree.sha;
+
+      // Get the entire tree recursively
+      const treeRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/git/trees/${treeSha}?recursive=1`, {
+        headers: {
+          'Authorization': `token ${token}`,
+          'Accept': 'application/vnd.github.v3+json'
+        }
+      });
+      if (!treeRes.ok) throw new Error(`Failed to fetch tree: ${treeRes.status}`);
+      const treeData = await treeRes.json();
+
+      // Filter for files (blobs)
+      const fileTree = treeData.tree.filter(item => item.type === 'blob');
+
+      // Build the CodeSandbox files object in the format: { files: { "path/to/file": { content: "..." } } }
+      const filesObject = { files: {} };
+
+      // Loop over each file and fetch its content from the GitHub Contents API.
+      for (const file of fileTree) {
+        // Using the GitHub Contents API to get the file content (Base64 encoded)
+        const fileRes = await fetch(`https://api.github.com/repos/${owner}/${repo}/contents/${file.path}?ref=${branch}`, {
+          headers: {
+            'Authorization': `token ${token}`,
+            'Accept': 'application/vnd.github.v3+json'
+          }
+        });
+        if (!fileRes.ok) {
+          console.warn(`Failed to fetch ${file.path}: ${fileRes.status}`);
+          continue;
         }
         const content = await fileResp.text();
         // Use the GitHub path as key; CodeSandbox expects an object with "content" property
