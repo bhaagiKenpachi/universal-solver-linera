@@ -1,8 +1,18 @@
 {
   "tasks": {
+    "apt": {
+      "name": "install dependencies",
+      "command": "sudo apt-get install g++ libclang-dev libssl-dev pkg-config build-essential",
+      "runAtStart": true
+    },
     "wasm": {
       "name": "wasm",
       "command": "rustup target add wasm32-unknown-unknown",
+      "runAtStart": true
+    },
+    "protoc": {
+      "name": "install protoc",
+      "command": "curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v21.11/protoc-21.11-linux-x86_64.zip && unzip protoc-21.11-linux-x86_64.zip -d $HOME/.local",
       "runAtStart": true
     },
     "install": {
