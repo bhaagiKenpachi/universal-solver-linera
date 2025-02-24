@@ -3,6 +3,10 @@
     {
       "name": "wasm ",
       "command": "rustup target add wasm32-unknown-unknown"
+    },
+    {
+      "name": "cargo install",
+      "command": "cargo build --release --target wasm32-unknown-unknown"
     }
   ]
 }
