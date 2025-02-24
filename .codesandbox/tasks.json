@@ -1,12 +1,14 @@
 {
-  "setupTasks": [
-    {
-      "name": "wasm ",
-      "command": "rustup target add wasm32-unknown-unknown"
+  "tasks": {
+    "wasm": {
+      "name": "wasm",
+      "command": "rustup target add wasm32-unknown-unknown",
+      "runAtStart": true
     },
-    {
+    "install": {
       "name": "cargo install",
-      "command": "cargo build --release --target wasm32-unknown-unknown"
+      "command": "cargo build --release --target wasm32-unknown-unknown",
+      "runAtStart": true
     }
-  ]
+  }
 }
