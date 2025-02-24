@@ -1,10 +1,5 @@
 {
   "tasks": {
-    "apt": {
-      "name": "install dependencies",
-      "command": "sudo apt-get install -y g++ libclang-dev libssl-dev pkg-config build-essential",
-      "runAtStart": true
-    },
     "wasm": {
       "name": "wasm",
       "command": "rustup target add wasm32-unknown-unknown",
