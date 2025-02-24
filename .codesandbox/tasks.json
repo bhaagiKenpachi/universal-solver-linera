@@ -2,7 +2,7 @@
   "tasks": {
     "wasm": {
       "name": "wasm",
-      "command": "rustup target add wasm32-unknown-unknown",
+      "command": "rustup install 1.81.0 && rustup target add wasm32-unknown-unknown && rustup default 1.81.0",
       "runAtStart": true
     },
     "install": {

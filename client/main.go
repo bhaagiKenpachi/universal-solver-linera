@@ -1,14 +1,17 @@
 package main
 
 import (
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"math/big"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/linera-protocol/examples/universal-solver/client/solver"
@@ -26,6 +29,8 @@ var (
 
 func init() {
 	initFlags()
+	// Initialize the solver logger
+	solver.InitLogger()
 }
 
 func initFlags() {
@@ -66,11 +71,11 @@ func initFlags() {
 	}
 
 	// Log configuration (without exposing seed phrase)
-	log.Printf("Initialized with:")
-	log.Printf("  Solver URL: %s", *solverURL)
-	log.Printf("  Solana RPC: %s", *solanaRPCURL)
-	log.Printf("  Ethereum RPC: %s", *ethereumRPCURL)
-	log.Printf("  Keys: Initialized successfully")
+	solver.Logger.Printf("Initialized with:")
+	solver.Logger.Printf("  Solver URL: %s", *solverURL)
+	solver.Logger.Printf("  Solana RPC: %s", *solanaRPCURL)
+	solver.Logger.Printf("  Ethereum RPC: %s", *ethereumRPCURL)
+	solver.Logger.Printf("  Keys: Initialized successfully")
 }
 
 func getEnvOrDefault(key, defaultValue string) string {
@@ -105,6 +110,8 @@ func main() {
 	http.HandleFunc("/get_pool_address", corsMiddleware(handleGetPoolAddress))
 	http.HandleFunc("/fetch_balance", corsMiddleware(handleFetchBalance))
 	http.HandleFunc("/quote_swap", corsMiddleware(handleQuoteSwap))
+	http.HandleFunc("/deploy_bytecode", corsMiddleware(handleDeployBytecode))
+	http.HandleFunc("/create_application", corsMiddleware(handleCreateApplication))
 
 	// Start server
 	port := getEnvOrDefault("PORT", "3001")
@@ -446,6 +453,154 @@ func handleQuoteSwap(w http.ResponseWriter, r *http.Request) {
 			"fromAmount":   amount,
 			"toAmount":     quote.ToAmount,
 			"exchangeRate": quote.ExchangeRate,
+		},
+	})
+}
+
+// StreamingRequest represents a streaming request with size information
+
+func handleDeployBytecode(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Create buffered reader for the request body
+	bodyReader := bufio.NewReaderSize(r.Body, 1024*1024) // 1MB buffer
+
+	// Read the contract size header
+	contractSizeStr, err := bodyReader.ReadString('|')
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error reading contract size: %v", err), http.StatusBadRequest)
+		return
+	}
+	contractSize, err := strconv.ParseInt(strings.TrimSuffix(contractSizeStr, "|"), 10, 64)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Invalid contract size: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Read the service size header
+	serviceSizeStr, err := bodyReader.ReadString('|')
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error reading service size: %v", err), http.StatusBadRequest)
+		return
+	}
+	serviceSize, err := strconv.ParseInt(strings.TrimSuffix(serviceSizeStr, "|"), 10, 64)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Invalid service size: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	solver.Logger.Printf("Receiving WASM files - Contract: %d bytes, Service: %d bytes",
+		contractSize, serviceSize)
+
+	// Create temporary files with buffered writers
+	contractFile, err := os.CreateTemp("/Users/luffybhaagi/RustroverProjects/linera-protocol-jvff/examples/universal-solver", "contract.wasm")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error creating temp file: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(contractFile.Name())
+	defer contractFile.Close()
+
+	serviceFile, err := os.CreateTemp("/Users/luffybhaagi/RustroverProjects/linera-protocol-jvff/examples/universal-solver", "service.wasm")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error creating temp file: %v", err), http.StatusInternalServerError)
+		return
+	}
+	defer os.Remove(serviceFile.Name())
+	defer serviceFile.Close()
+
+	// Create buffered writers
+	contractWriter := bufio.NewWriterSize(contractFile, 1024*1024) // 1MB buffer
+	serviceWriter := bufio.NewWriterSize(serviceFile, 1024*1024)   // 1MB buffer
+
+	// Copy contract WASM with progress tracking
+	contractWritten, err := io.CopyN(contractWriter, bodyReader, contractSize)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error writing contract WASM: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if err := contractWriter.Flush(); err != nil {
+		http.Error(w, fmt.Sprintf("Error flushing contract WASM: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Copy service WASM with progress tracking
+	serviceWritten, err := io.CopyN(serviceWriter, bodyReader, serviceSize)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error writing service WASM: %v", err), http.StatusInternalServerError)
+		return
+	}
+	if err := serviceWriter.Flush(); err != nil {
+		http.Error(w, fmt.Sprintf("Error flushing service WASM: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Verify sizes
+	if contractWritten != contractSize || serviceWritten != serviceSize {
+		http.Error(w, "WASM file size mismatch", http.StatusBadRequest)
+		return
+	}
+
+	solver.Logger.Printf("Successfully received WASM files - Contract: %d bytes, Service: %d bytes",
+		contractWritten, serviceWritten)
+
+	// Execute the publish bytecode command
+	bytecodeID, err := solverClient.PublishBytecodeFromFiles(contractFile.Name(), serviceFile.Name())
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error publishing bytecode: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"data": map[string]interface{}{
+			"bytecodeId":   bytecodeID,
+			"contractSize": contractWritten,
+			"serviceSize":  serviceWritten,
+		},
+	})
+}
+
+func handleCreateApplication(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get bytecode ID from request body
+	var req struct {
+		BytecodeID string `json:"bytecodeId"`
+	}
+
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("Error parsing request body: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	// Validate bytecode ID
+	if req.BytecodeID == "" {
+		http.Error(w, "bytecodeId is required", http.StatusBadRequest)
+		return
+	}
+
+	// Create the application
+	applicationID, err := solverClient.CreateApplication(req.BytecodeID)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error creating application: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"data": map[string]interface{}{
+			"applicationId": applicationID,
 		},
 	})
 }

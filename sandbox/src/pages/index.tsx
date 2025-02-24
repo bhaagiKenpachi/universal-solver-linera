@@ -28,6 +28,88 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
 
+  const deployBytecode = async (contractWasm: Uint8Array, serviceWasm: Uint8Array) => {
+    console.log("Deploying bytecode...");
+    console.log(`Contract size: ${contractWasm.length} bytes`);
+    console.log(`Service size: ${serviceWasm.length} bytes`);
+
+    try {
+      // Create the request body with size headers
+      const body = new Uint8Array(contractWasm.length + serviceWasm.length + 100); // Extra space for headers
+      let offset = 0;
+
+      // Write contract size header
+      const contractSizeStr = `${contractWasm.length}|`;
+      const contractSizeBytes = new TextEncoder().encode(contractSizeStr);
+      body.set(contractSizeBytes, offset);
+      offset += contractSizeBytes.length;
+
+      // Write service size header
+      const serviceSizeStr = `${serviceWasm.length}|`;
+      const serviceSizeBytes = new TextEncoder().encode(serviceSizeStr);
+      body.set(serviceSizeBytes, offset);
+      offset += serviceSizeBytes.length;
+
+      // Write contract WASM
+      body.set(contractWasm, offset);
+      offset += contractWasm.length;
+
+      // Write service WASM
+      body.set(serviceWasm, offset);
+
+      // Send the request
+      const response = await fetch('http://localhost:3001/deploy_bytecode', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/octet-stream',
+        },
+        body: body,
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json();
+        console.error('Error deploying bytecode:', errorData.message);
+        throw new Error(`Failed to deploy bytecode: ${errorData.message}`);
+      }
+
+      const data = await response.json();
+      console.log('Successfully deployed bytecode:', data);
+      return data.data.bytecodeId;
+    } catch (error) {
+      console.error('Error in deployBytecode:', error);
+      throw error;
+    }
+  };
+
+  const createApplication = async (bytecodeId: string) => {
+    console.log("Creating application with bytecode ID:", bytecodeId);
+    
+    try {
+        const response = await fetch('http://localhost:3001/create_application', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                bytecodeId: bytecodeId,
+            }),
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json();
+            console.error('Error creating application:', errorData.message);
+            throw new Error(`Failed to create application: ${errorData.message}`);
+        }
+
+        const data = await response.json();
+        console.log('Successfully created application:', data);
+        return data.data.applicationId;
+    } catch (error) {
+        console.error('Error in createApplication:', error);
+        throw error;
+    }
+  };
+
   const pushToCodeSandbox = async (files: ProjectFiles) => {
     const sdk = new CodeSandbox(process.env.NEXT_PUBLIC_CODESANDBOX_TOKEN);
     // const sandbox = await sdk.sandbox.create({
@@ -54,48 +136,79 @@ export default function Home() {
     // folderInput.webkitdirectory = true; // Allow folder selection
 
     // folderInput.onchange = async (event) => {
-      // const files = (event.target as HTMLInputElement).files;
-      if (files) {
-        for (const [path, { content }] of Object.entries(files)) {
+      // const files = (event.target as HTMLIn.putElement).files;
+    //   if (files) {
+    //     for (const [path, { content }] of Object.entries(files)) {
+    //
+    //       console.log(path)
+    //       await sandbox.fs.writeTextFile(path, content);
+    //     }
+    //
+    //     console.log("files uploaded to sandbox")
+    //
+    //     // Listen to setup progress
+    //     sandbox.setup.onSetupProgressUpdate((progress) => {
+    //       console.log(`Setup progress: ${progress.currentStepIndex + 1}/${progress.steps.length}`);
+    //       console.log(`Current step: ${progress.steps[progress.currentStepIndex].name}`);
+    //     });
+    //
+    //     // Get current progress
+    //     const progress = await sandbox.setup.getProgress();
+    //     console.log(`Setup state: ${progress.state}`);
+    //
+    //   // Wait for setup to finish
+    //     const result = await sandbox.setup.waitForFinish();
+    //     if (result.state === "FINISHED") {
+    //       console.log("Setup completed successfully");
+    //     }
+    //
+    //     // Get all tasks
+    //     const tasks = await sandbox.tasks.getTasks();
+    //     // Run all startup tasks
+    //     for (const task of tasks) {
+    //       console.log(`Starting ${task.name}...`);
+    //       sandbox.tasks.runTask(task.id);
+    //     }
+    //
+    // const checkTasksRunning = async () => {
+    //   const tasks = await sandbox.tasks.getTasks();
+    //   const runningTasks = tasks.filter(task => task.state === 'IN_PROGRESS');
+    //
+    //   if (runningTasks.length > 0) {
+    //     console.log(`Currently running tasks: ${runningTasks.map(task => task.name).join(', ')}`);
+    //     setTimeout(checkTasksRunning, 5000); // Check again after 5 seconds
+    //   } else {
+    //     console.log("No tasks are currently running.");
+    //   }
+    // };
+    //
+    // checkTasksRunning();
+    //
+    // };
 
-          console.log(path)
-          await sandbox.fs.writeTextFile(path, content);
-        }
+    const cargoToml = await sandbox.fs.readFile('./Cargo.toml');
 
-        console.log("files uploaded to sandbox")
+    const cargoTomlContent = cargoToml ? new TextDecoder().decode(cargoToml) : '';
+    console.log(cargoTomlContent);
+    const binNames = cargoTomlContent.match(/\[\[bin\]\][\s\S]*?name\s*=\s*"([^"]+)"/g)?.map(line => {
+      const match = line.match(/name\s*=\s*"([^"]+)"/);
+      return match ? match[1] : null;
+    }).filter(name => name !== null) || [];
 
-        // Listen to setup progress
-        sandbox.setup.onSetupProgressUpdate((progress) => {
-          console.log(`Setup progress: ${progress.currentStepIndex + 1}/${progress.steps.length}`);
-          console.log(`Current step: ${progress.steps[progress.currentStepIndex].name}`);
-        });
+    console.log("Extracted bin names:", binNames);
+    const contractNames = binNames.filter(bin => /_contract$/.test(bin));
+    const serviceNames = binNames.filter(bin => /_service$/.test(bin));
 
-        // Get current progress
-        const progress = await sandbox.setup.getProgress();
-        console.log(`Setup state: ${progress.state}`);
+    const _contract = await sandbox.fs.readFile(`./target/wasm32-unknown-unknown/release/${contractNames[0]}.wasm`);
+    const _service = await sandbox.fs.readFile(`./target/wasm32-unknown-unknown/release/${serviceNames[0]}.wasm`);
+    console.log(_contract)
+    console.log(_service)
 
-        // Wait for setup to finish
-        const result = await sandbox.setup.waitForFinish();
-        if (result.state === "FINISHED") {
-          console.log("Setup completed successfully");
-        }
+  const bytecodeId = await deployBytecode(_contract, _service);
+  const applicationId = await createApplication(bytecodeId);
+  console.log('Application created with ID:', applicationId);
 
-
-        const command = sandbox.shells.run(`rustup target add wasm32-unknown-unknown && cargo build --release --target wasm32-unknown-unknown`);
-        command.onOutput((output) => {
-          console.log(output);
-        });
-
-        // Wait for the dev server port to open
-        const portInfo = await sandbox.ports.waitForPort(3001);
-        console.log(`Dev server is ready at: ${portInfo.getPreviewUrl()}`);
-      // }
-
-    };
-    // Open the folder dialog
-    // folderInput.dispatchEvent(new MouseEvent('click'));
   };
-
 
   // Recursively fetch directory contents from GitHub
   async function fetchDirectory(owner: string, repo: string, branch: string): Promise<ProjectFiles> {
@@ -171,9 +284,9 @@ export default function Home() {
       const apiUrl = `https://api.github.com/repos/${owner}/${repo}?ref=${branch}`;
 
       // Recursively fetch files from the given folder
-      const files = await fetchDirectory(owner, repo, branch);
-      console.log(files)
-      await pushToCodeSandbox(files);
+      // const files = await fetchDirectory(owner, repo, branch);
+      // console.log(files)
+      await pushToCodeSandbox({});
 
     } catch (err) {
       setError(err.message);

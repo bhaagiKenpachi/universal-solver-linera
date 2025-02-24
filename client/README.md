@@ -130,3 +130,68 @@ Response:
     }
 }
 ``` 
+
+## Deploy Bytecode
+
+### POST /deploy_bytecode
+
+This endpoint publishes the solver contract and service bytecode using the Linera CLI.
+
+#### Request Body
+
+The request body should be a JSON object with the following structure:
+
+```json
+{
+  "contractWasm": "base64_encoded_contract_wasm_bytes",
+  "serviceWasm": "base64_encoded_service_wasm_bytes"
+}
+```
+
+- `contractWasm`: Base64 encoded bytes of the contract WASM file.
+- `serviceWasm`: Base64 encoded bytes of the service WASM file.
+
+#### Response
+
+On success, the response will be a JSON object with the following structure:
+
+```json
+{
+  "status": "success",
+  "data": {
+    "bytecodeId": "e476187f6ddfeb9d588c7b45d3df334d5501d6499b3f9ad5595cae86cce16a65"
+  }
+}
+```
+
+In case of an error, the response will contain an error message:
+
+```json
+{
+  "status": "error",
+  "message": "Error message here"
+}
+```
+
+#### Example Request
+
+```bash
+# First, encode your WASM files to base64
+CONTRACT_WASM=$(base64 examples/target/wasm32-unknown-unknown/release/solver_contract.wasm)
+SERVICE_WASM=$(base64 examples/target/wasm32-unknown-unknown/release/solver_service.wasm)
+
+# Then make the request
+curl -X POST http://localhost:3001/deploy_bytecode \
+  -H "Content-Type: application/json" \
+  -d "{
+    \"contractWasm\": \"$CONTRACT_WASM\",
+    \"serviceWasm\": \"$SERVICE_WASM\"
+  }"
+```
+
+#### Notes
+
+- The WASM content must be base64 encoded.
+- The endpoint requires the Linera CLI to be installed and available in the system PATH.
+- The server must have permission to execute the Linera CLI.
+- Temporary files are created and cleaned up automatically.

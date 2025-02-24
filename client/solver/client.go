@@ -1,13 +1,18 @@
 package solver
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
 	"net/http"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -35,6 +40,7 @@ var (
 func InitRPCEndpoints(ethereumURL, solanaURL string) {
 	EthereumRPC = ethereumURL
 	SolanaRPC = solanaURL
+	Logger.Printf("Initialized RPC endpoints - Ethereum: %s, Solana: %s", ethereumURL, solanaURL)
 }
 
 // InitKeys initializes the private keys from a seed phrase
@@ -42,8 +48,10 @@ func InitKeys(seedPhrase string) error {
 	var err error
 	chainKeys, err = keys.DeriveKeysFromSeedPhrase(seedPhrase)
 	if err != nil {
+		Logger.Printf("Failed to derive keys: %v", err)
 		return fmt.Errorf("failed to derive keys: %w", err)
 	}
+	Logger.Printf("Successfully initialized chain keys")
 	return nil
 }
 
@@ -53,6 +61,7 @@ type Client struct {
 }
 
 func NewClient(baseURL string) *Client {
+	Logger.Printf("Creating new solver client with base URL: %s", baseURL)
 	return &Client{
 		baseURL: baseURL,
 		http:    &http.Client{},
@@ -248,7 +257,7 @@ func (c *Client) CalculateSwap(fromToken, toToken string, amount float64) (*Swap
 		Data struct {
 			CalculateSwap struct {
 				FromToken    string  `json:"fromToken"`
-				ToToken      string  `json:"toToken"` 
+				ToToken      string  `json:"toToken"`
 				FromAmount   float64 `json:"fromAmount"`
 				ToAmount     float64 `json:"toAmount"`
 				ExchangeRate float64 `json:"exchangeRate"`
@@ -1003,4 +1012,194 @@ func (c *Client) RequestEthereumFaucetWithAmount(address string, amount float64)
 		"amount":  fmt.Sprintf("%f ETH", amount),
 		"address": address,
 	}, nil
+}
+
+// PublishBytecode executes the Linera publish-bytecode command with provided WASM content
+func (c *Client) PublishBytecode(contractWasm, serviceWasm []byte) (string, error) {
+	Logger.Printf("Publishing bytecode (contract: %d bytes, service: %d bytes)...", len(contractWasm), len(serviceWasm))
+
+	// Create temporary directory for WASM files
+	tempDir, err := os.MkdirTemp("", "linera-wasm")
+	if err != nil {
+		Logger.Printf("Error creating temp directory: %v", err)
+		return "", fmt.Errorf("failed to create temp directory: %v", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	// Write WASM files directly to temp directory
+	contractPath := filepath.Join(tempDir, "solver_contract.wasm")
+	servicePath := filepath.Join(tempDir, "solver_service.wasm")
+
+	// Write files using buffered writer for better performance
+	if err := writeFileBuffered(contractPath, contractWasm); err != nil {
+		Logger.Printf("Error writing contract WASM: %v", err)
+		return "", fmt.Errorf("failed to write contract WASM: %v", err)
+	}
+
+	if err := writeFileBuffered(servicePath, serviceWasm); err != nil {
+		Logger.Printf("Error writing service WASM: %v", err)
+		return "", fmt.Errorf("failed to write service WASM: %v", err)
+	}
+
+	// Prepare and execute command with environment variables
+	cmd := exec.Command("linera", "publish-bytecode", contractPath, servicePath)
+	cmd.Env = append(os.Environ(),
+		"LINERA_WALLET=/var/folders/3_/ty3nbwgs5cv30xhjxd1s0_3r0000gn/T/.tmpFRJbhX/wallet_0.json",
+		"LINERA_STORAGE=rocksdb:/var/folders/3_/ty3nbwgs5cv30xhjxd1s0_3r0000gn/T/.tmpFRJbhX/client_0.db",
+		"CHAIN_1=e476187f6ddfeb9d588c7b45d3df334d5501d6499b3f9ad5595cae86cce16a65",
+		"OWNER_1=598b7023d32f48573a47acb80ea70781c375fc60a352d8043cf8fcacc5d5b2c9",
+		"CHAIN_2=69705f85ac4c9fef6c02b4d83426aaaf05154c645ec1c61665f8e450f0468bc0",
+		"OWNER_2=5dcc4b83f44bfd28086560c5c4872cfd6979dee316d1b6b3ee8da038199ca0a3",
+	)
+
+	// Get the output using pipe for better performance with large outputs
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stdout pipe: %v", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start command: %v", err)
+	}
+
+	// Read output using scanner for better memory efficiency
+	var outputBuilder strings.Builder
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		outputBuilder.WriteString(scanner.Text())
+		outputBuilder.WriteString("\n")
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return "", fmt.Errorf("command failed: %v", err)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading command output: %v", err)
+	}
+
+	// Parse the output to get the bytecode ID
+	outputStr := outputBuilder.String()
+	parts := strings.Split(outputStr, "=")
+	if len(parts) != 2 {
+		Logger.Printf("Unexpected output format: %s", outputStr)
+		return "", fmt.Errorf("unexpected output format: %s", outputStr)
+	}
+
+	bytecodeID := strings.TrimSpace(parts[1])
+	Logger.Printf("Successfully published bytecode with ID: %s", bytecodeID)
+
+	return bytecodeID, nil
+}
+
+// writeFileBuffered writes data to a file using a buffered writer for better performance
+func writeFileBuffered(filepath string, data []byte) error {
+	file, err := os.OpenFile(filepath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	writer := bufio.NewWriter(file)
+	if _, err := writer.Write(data); err != nil {
+		return err
+	}
+
+	return writer.Flush()
+}
+
+// PublishBytecodeFromFiles executes the Linera publish-bytecode command with provided file paths
+func (c *Client) PublishBytecodeFromFiles(contractPath, servicePath string) (string, error) {
+	Logger.Printf("Publishing bytecode from files...")
+
+	// Prepare and execute command with environment variables
+	cmd := exec.Command("linera", "publish-bytecode", contractPath, servicePath)
+	cmd.Env = append(os.Environ(),
+		"LINERA_WALLET=/var/folders/3_/ty3nbwgs5cv30xhjxd1s0_3r0000gn/T/.tmpFRJbhX/wallet_0.json",
+		"LINERA_STORAGE=rocksdb:/var/folders/3_/ty3nbwgs5cv30xhjxd1s0_3r0000gn/T/.tmpFRJbhX/client_0.db",
+		"CHAIN_1=e476187f6ddfeb9d588c7b45d3df334d5501d6499b3f9ad5595cae86cce16a65",
+		"OWNER_1=598b7023d32f48573a47acb80ea70781c375fc60a352d8043cf8fcacc5d5b2c9",
+		"CHAIN_2=69705f85ac4c9fef6c02b4d83426aaaf05154c645ec1c61665f8e450f0468bc0",
+		"OWNER_2=5dcc4b83f44bfd28086560c5c4872cfd6979dee316d1b6b3ee8da038199ca0a3",
+	)
+
+	// Get the output using pipe for better performance
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stdout pipe: %v", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start command: %v", err)
+	}
+
+	// Read output using scanner for better memory efficiency
+	var outputBuilder strings.Builder
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		outputBuilder.WriteString(scanner.Text())
+		outputBuilder.WriteString("\n")
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return "", fmt.Errorf("command failed: %v", err)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading command output: %v", err)
+	}
+
+	// Parse the output to get the bytecode ID
+	outputStr := strings.TrimSpace(outputBuilder.String())
+
+	Logger.Printf("Successfully published bytecode with ID: %s", outputStr)
+	return outputStr, nil
+}
+
+// CreateApplication executes the Linera create-application command with the provided bytecode ID
+func (c *Client) CreateApplication(bytecodeID string) (string, error) {
+	Logger.Printf("Creating application with bytecode ID: %s", bytecodeID)
+
+	// Prepare the command
+	cmd := exec.Command("linera", "create-application", bytecodeID)
+	cmd.Env = append(os.Environ(),
+		"LINERA_WALLET=/var/folders/3_/ty3nbwgs5cv30xhjxd1s0_3r0000gn/T/.tmpFRJbhX/wallet_0.json",
+		"LINERA_STORAGE=rocksdb:/var/folders/3_/ty3nbwgs5cv30xhjxd1s0_3r0000gn/T/.tmpFRJbhX/client_0.db",
+		"CHAIN_1=e476187f6ddfeb9d588c7b45d3df334d5501d6499b3f9ad5595cae86cce16a65",
+		"OWNER_1=598b7023d32f48573a47acb80ea70781c375fc60a352d8043cf8fcacc5d5b2c9",
+		"CHAIN_2=69705f85ac4c9fef6c02b4d83426aaaf05154c645ec1c61665f8e450f0468bc0",
+		"OWNER_2=5dcc4b83f44bfd28086560c5c4872cfd6979dee316d1b6b3ee8da038199ca0a3",
+	)
+
+	// Get the output using pipe for better performance
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return "", fmt.Errorf("failed to create stdout pipe: %v", err)
+	}
+
+	if err := cmd.Start(); err != nil {
+		return "", fmt.Errorf("failed to start command: %v", err)
+	}
+
+	// Read output using scanner for better memory efficiency
+	var outputBuilder strings.Builder
+	scanner := bufio.NewScanner(stdout)
+	for scanner.Scan() {
+		outputBuilder.WriteString(scanner.Text())
+		outputBuilder.WriteString("\n")
+	}
+
+	if err := cmd.Wait(); err != nil {
+		return "", fmt.Errorf("command failed: %v", err)
+	}
+
+	if err := scanner.Err(); err != nil {
+		return "", fmt.Errorf("error reading command output: %v", err)
+	}
+
+	// Parse the output to get the application ID
+	outputStr := strings.TrimSpace(outputBuilder.String())
+	Logger.Printf("Successfully created application with ID: %s", outputStr)
+
+	return outputStr, nil
 }
