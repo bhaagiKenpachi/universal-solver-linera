@@ -8,7 +8,7 @@ async-graphql = { version = "=7.0.2", default-features = false }
 linera-sdk = { git = "https://github.com/jvff/linera-protocol", rev = "26a5299" }
 serde = { version = "1.0.217", features = ["derive"] }
 serde_json = "1.0.137"
-linera-views = "0.13.1"
+linera-views = { git = "https://github.com/jvff/linera-protocol", rev = "26a5299" }
 base64 = "0.21.7"
 sha3 = "0.10.8"
 

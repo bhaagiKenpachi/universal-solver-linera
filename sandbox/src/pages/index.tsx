@@ -64,7 +64,24 @@ export default function Home() {
 
         console.log("files uploaded to sandbox")
 
-        const command = sandbox.shells.run(`cargo build --release --target wasm32-unknown-unknown`);
+        // Listen to setup progress
+        sandbox.setup.onSetupProgressUpdate((progress) => {
+          console.log(`Setup progress: ${progress.currentStepIndex + 1}/${progress.steps.length}`);
+          console.log(`Current step: ${progress.steps[progress.currentStepIndex].name}`);
+        });
+
+        // Get current progress
+        const progress = await sandbox.setup.getProgress();
+        console.log(`Setup state: ${progress.state}`);
+
+        // Wait for setup to finish
+        const result = await sandbox.setup.waitForFinish();
+        if (result.state === "FINISHED") {
+          console.log("Setup completed successfully");
+        }
+
+
+        const command = sandbox.shells.run(`rustup target add wasm32-unknown-unknown && cargo build --release --target wasm32-unknown-unknown`);
         command.onOutput((output) => {
           console.log(output);
         });
