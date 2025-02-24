@@ -2,7 +2,7 @@
   "tasks": {
     "apt": {
       "name": "install dependencies",
-      "command": "sudo apt-get install g++ libclang-dev libssl-dev pkg-config build-essential",
+      "command": "sudo apt-get install -y g++ libclang-dev libssl-dev pkg-config build-essential",
       "runAtStart": true
     },
     "wasm": {
