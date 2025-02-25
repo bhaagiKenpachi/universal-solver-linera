@@ -41,6 +41,8 @@ interface RepoContent {
     download_url: string | null;
 }
 
+const API_BASE_URL = 'https://uni-solver.ngrok.io';
+
 export default function Home() {
   const [githubUrl, setGithubUrl] = useState<string>("");
   const [files, setFiles] = useState([]);
@@ -320,9 +322,13 @@ export default function Home() {
     // Check if user is authenticated
     const checkAuth = async () => {
       try {
-        const response = await fetch('http://localhost:3001/repos', {
+        const response = await fetch(`${API_BASE_URL}/repos`, {
           credentials: 'include',
+          headers: {
+            'Accept': 'application/json',
+          },
         });
+        
         if (response.ok) {
           const data = await response.json();
           setRepositories(data.data.repositories);
@@ -336,7 +342,7 @@ export default function Home() {
   }, []);
 
   const handleLogin = () => {
-    window.location.href = 'http://localhost:3001/auth/github';
+    window.location.href = `${API_BASE_URL}/auth/github`;
   };
 
   if (!isAuthenticated) {
@@ -464,11 +470,10 @@ const GithubAuth = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   useEffect(() => {
-    // Check if user is authenticated
     const checkAuth = async () => {
       try {
-        const response = await fetch('http://localhost:3001/repos', {
-          credentials: 'include', // Important for sending cookies
+        const response = await fetch(`${API_BASE_URL}/repos`, {
+          credentials: 'include',
           headers: {
             'Accept': 'application/json',
           },
@@ -488,7 +493,6 @@ const GithubAuth = () => {
     const urlParams = new URLSearchParams(window.location.search);
     if (urlParams.get('auth') === 'success') {
       checkAuth();
-      // Clean up URL
       window.history.replaceState({}, document.title, window.location.pathname);
     } else {
       checkAuth();
@@ -496,8 +500,7 @@ const GithubAuth = () => {
   }, []);
 
   const handleLogin = () => {
-    // Open GitHub auth in same window
-    window.location.href = 'http://localhost:3001/auth/github';
+    window.location.href = `${API_BASE_URL}/auth/github`;
   };
 
   if (!isAuthenticated) {
@@ -516,7 +519,7 @@ const GithubAuth = () => {
           <div key={repo.id} className="repository-item">
             <h3>{repo.name}</h3>
             <p>{repo.description}</p>
-            <RepoFiles owner={repo.owner.login} repo={repo.name} />
+            {/*<RepoFiles owner={repo.owner.login} repo={repo.name} />*/}
             <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
               View on GitHub
             </a>

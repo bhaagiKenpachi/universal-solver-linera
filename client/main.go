@@ -95,12 +95,16 @@ func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Set CORS headers
 		origin := r.Header.Get("Origin")
-		if origin == "http://localhost:3002" { // Allow your frontend origin
+		allowedOrigins := map[string]bool{
+			"http://localhost:3002":       true,
+			"https://uni-solver.ngrok.io": true,
+		}
+
+		if allowedOrigins[origin] {
 			w.Header().Set("Access-Control-Allow-Origin", origin)
 			w.Header().Set("Access-Control-Allow-Credentials", "true")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
-			// Allow cookies to be exposed to the client
 			w.Header().Set("Access-Control-Expose-Headers", "Set-Cookie")
 		}
 
@@ -629,15 +633,21 @@ func handleGithubAuth(w http.ResponseWriter, r *http.Request) {
 	// Generate random state for CSRF protection
 	state := solver.GenerateRandomState()
 
-	// Store state in session/cookie
-	http.SetCookie(w, &http.Cookie{
+	// Get the host from the request
+	host := r.Host
+
+	// Store state in cookie with correct domain
+	stateCookie := &http.Cookie{
 		Name:     "oauth_state",
 		Value:    state,
+		Path:     "/",
+		Domain:   host, // Use the full ngrok domain
 		MaxAge:   3600,
-		HttpOnly: true,
+		HttpOnly: false,
 		Secure:   true,
-		SameSite: http.SameSiteStrictMode,
-	})
+		SameSite: http.SameSiteNoneMode,
+	}
+	http.SetCookie(w, stateCookie)
 
 	// Redirect to GitHub OAuth
 	authURL := fmt.Sprintf(
@@ -675,21 +685,41 @@ func handleGithubCallback(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Set token in cookie with correct domain and path
+	// Get the host from the request
+	host := r.Host
+
+	// Set token in cookie with correct settings for cross-domain access
 	cookie := &http.Cookie{
 		Name:     "github_token",
 		Value:    token,
 		Path:     "/",
-		Domain:   "localhost",
+		Domain:   host, // Use the full ngrok domain
 		MaxAge:   3600 * 24,
-		HttpOnly: false,                // Allow JavaScript access
-		Secure:   false,                // Allow non-HTTPS in development
-		SameSite: http.SameSiteLaxMode, // Less strict SameSite policy
+		HttpOnly: false,                 // Allow JavaScript access
+		Secure:   true,                  // Required for HTTPS
+		SameSite: http.SameSiteNoneMode, // Required for cross-site access
 	}
 	http.SetCookie(w, cookie)
 
+	// Set state cookie with same settings
+	stateCookie = &http.Cookie{
+		Name:     "oauth_state",
+		Value:    stateCookie.Value,
+		Path:     "/",
+		Domain:   host, // Use the full ngrok domain
+		MaxAge:   3600,
+		HttpOnly: false,
+		Secure:   true,
+		SameSite: http.SameSiteNoneMode,
+	}
+	http.SetCookie(w, stateCookie)
+
 	// Redirect to frontend with success parameter
-	http.Redirect(w, r, "http://localhost:3002/?auth=success", http.StatusTemporaryRedirect)
+	frontendURL := "http://localhost:3002"
+	// if strings.Contains(r.Host, "ngrok.io") {
+	// 	frontendURL = "https://uni-solver.ngrok.io"
+	// }
+	http.Redirect(w, r, frontendURL+"/?auth=success", http.StatusTemporaryRedirect)
 }
 
 func handleListRepos(w http.ResponseWriter, r *http.Request) {
