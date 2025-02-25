@@ -22,11 +22,32 @@ interface ProjectFiles {
   [filePath: string]: ProjectFile;
 }
 
+interface Repository {
+    id: number;
+    name: string;
+    full_name: string;
+    description: string;
+    html_url: string;
+    private: boolean;
+}
+
+interface RepoContent {
+    type: string;
+    name: string;
+    path: string;
+    sha: string;
+    size: number;
+    url: string;
+    download_url: string | null;
+}
+
 export default function Home() {
   const [githubUrl, setGithubUrl] = useState<string>("");
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
 
   const deployBytecode = async (contractWasm: Uint8Array, serviceWasm: Uint8Array) => {
     console.log("Deploying bytecode...");
@@ -295,32 +316,213 @@ export default function Home() {
     }
   }
 
+  useEffect(() => {
+    // Check if user is authenticated
+    const checkAuth = async () => {
+      try {
+        const response = await fetch('http://localhost:3001/repos', {
+          credentials: 'include',
+        });
+        if (response.ok) {
+          const data = await response.json();
+          setRepositories(data.data.repositories);
+          setIsAuthenticated(true);
+        }
+      } catch (error) {
+        console.error('Error checking auth:', error);
+      }
+    };
+    checkAuth();
+  }, []);
+
+  const handleLogin = () => {
+    window.location.href = 'http://localhost:3001/auth/github';
+  };
+
+  if (!isAuthenticated) {
+    return <button onClick={handleLogin}>Login with GitHub</button>;
+  }
 
   return (
     <>
-      <input 
-        type="text" 
-        placeholder="Enter GitHub URL" 
-        value={githubUrl} 
-        onChange={(e) => setGithubUrl(e.target.value)} 
-      />
-      {files.length ? (
-          <ul>
-            {files.map(file => (
-                <li key={file.sha}>
-                  <a href={file.html_url} target="_blank" rel="noopener noreferrer">
-                    {file.name}
-                  </a>
-                  <span> ({file.type})</span>
-                </li>
-            ))}
-          </ul>
-      ) : (
-          <p>Loading files...</p>
-      )}
-      {/*<button onClick={ async () => await fetchGithubFiles(githubUrl)}>Submit</button>*/}
-      <button onClick={uploadToCodeSandbox}>Start CodeSandbox</button>
+      <GithubAuth />
+      {/*<input */}
+      {/*  type="text" */}
+      {/*  placeholder="Enter GitHub URL" */}
+      {/*  value={githubUrl} */}
+      {/*  onChange={(e) => setGithubUrl(e.target.value)} */}
+      {/*/>*/}
+      {/*{files.length ? (*/}
+      {/*    <ul>*/}
+      {/*      {files.map(file => (*/}
+      {/*          <li key={file.sha}>*/}
+      {/*            <a href={file.html_url} target="_blank" rel="noopener noreferrer">*/}
+      {/*              {file.name}*/}
+      {/*            </a>*/}
+      {/*            <span> ({file.type})</span>*/}
+      {/*          </li>*/}
+      {/*      ))}*/}
+      {/*    </ul>*/}
+      {/*) : (*/}
+      {/*    <p>Loading files...</p>*/}
+      {/*)}*/}
+      {/*/!*<button onClick={ async () => await fetchGithubFiles(githubUrl)}>Submit</button>*!/*/}
+      {/*<button onClick={uploadToCodeSandbox}>Start CodeSandbox</button>*/}
       
     </>
   );
 }
+
+const RepoFiles = ({ owner, repo }: { owner: string; repo: string }) => {
+    const [contents, setContents] = useState<RepoContent[]>([]);
+    const [currentPath, setCurrentPath] = useState<string>('');
+    const [loading, setLoading] = useState(false);
+
+    const fetchContents = async (path: string = '') => {
+        setLoading(true);
+        try {
+            const response = await fetch(
+                `http://localhost:3001/repo/files?owner=${owner}&repo=${repo}&path=${path}`,
+                {
+                    credentials: 'include',
+                    headers: {
+                        'Accept': 'application/json',
+                    },
+                }
+            );
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch repository contents');
+            }
+
+            const data = await response.json();
+            setContents(data.data.contents);
+            setCurrentPath(path);
+        } catch (error) {
+            console.error('Error fetching contents:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchContents();
+    }, [owner, repo]);
+
+    const handleFileClick = (content: RepoContent) => {
+        if (content.type === 'dir') {
+            fetchContents(content.path);
+        } else {
+            window.open(content.download_url!, '_blank');
+        }
+    };
+
+    const handleBackClick = () => {
+        const parentPath = currentPath.split('/').slice(0, -1).join('/');
+        fetchContents(parentPath);
+    };
+
+    if (loading) {
+        return <div>Loading...</div>;
+    }
+
+    return (
+        <div className="repo-contents">
+            {currentPath && (
+                <button onClick={handleBackClick} className="back-button">
+                    ← Back
+                </button>
+            )}
+            <div className="path-display">
+                Current path: /{currentPath}
+            </div>
+            <div className="contents-list">
+                {contents.map(content => (
+                    <div
+                        key={content.sha}
+                        className="content-item"
+                        onClick={() => handleFileClick(content)}
+                    >
+                        <span className="content-icon">
+                            {content.type === 'dir' ? '📁' : '📄'}
+                        </span>
+                        <span className="content-name">{content.name}</span>
+                        {content.type === 'file' && (
+                            <span className="content-size">
+                                {(content.size / 1024).toFixed(1)} KB
+                            </span>
+                        )}
+                    </div>
+                ))}
+            </div>
+        </div>
+    );
+};
+
+const GithubAuth = () => {
+  const [repositories, setRepositories] = useState<Repository[]>([]);
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+
+  useEffect(() => {
+    // Check if user is authenticated
+    const checkAuth = async () => {
+      try {
+        const response = await fetch('http://localhost:3001/repos', {
+          credentials: 'include', // Important for sending cookies
+          headers: {
+            'Accept': 'application/json',
+          },
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          setRepositories(data.data.repositories);
+          setIsAuthenticated(true);
+        }
+      } catch (error) {
+        console.error('Error checking auth:', error);
+      }
+    };
+
+    // Check for auth success parameter in URL
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('auth') === 'success') {
+      checkAuth();
+      // Clean up URL
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else {
+      checkAuth();
+    }
+  }, []);
+
+  const handleLogin = () => {
+    // Open GitHub auth in same window
+    window.location.href = 'http://localhost:3001/auth/github';
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <button onClick={handleLogin} className="login-button">
+        Login with GitHub
+      </button>
+    );
+  }
+
+  return (
+    <div>
+      <h2>Your Repositories</h2>
+      <div className="repository-list">
+        {repositories.map(repo => (
+          <div key={repo.id} className="repository-item">
+            <h3>{repo.name}</h3>
+            <p>{repo.description}</p>
+            <RepoFiles owner={repo.owner.login} repo={repo.name} />
+            <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
+              View on GitHub
+            </a>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};

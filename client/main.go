@@ -19,6 +19,7 @@ import (
 
 var (
 	solverClient *solver.Client
+	githubClient *solver.GithubAuthConfig
 	SolanaRPC    string
 	EthereumRPC  string
 	chainToToken = map[string]string{
@@ -62,6 +63,10 @@ func initFlags() {
 	// Initialize solver client with provided URL
 	solverClient = solver.NewClient(*solverURL)
 
+	githubClient = solver.NewGithubClient(os.Getenv("GITHUB_CLIENT_ID"),
+		os.Getenv("GITHUB_CLIENT_SECRET"),
+		os.Getenv("GITHUB_REDIRECT_URI"))
+
 	// Initialize RPC endpoints
 	solver.InitRPCEndpoints(*ethereumRPCURL, *solanaRPCURL)
 
@@ -89,9 +94,15 @@ func getEnvOrDefault(key, defaultValue string) string {
 func corsMiddleware(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+		origin := r.Header.Get("Origin")
+		if origin == "http://localhost:3002" { // Allow your frontend origin
+			w.Header().Set("Access-Control-Allow-Origin", origin)
+			w.Header().Set("Access-Control-Allow-Credentials", "true")
+			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+			// Allow cookies to be exposed to the client
+			w.Header().Set("Access-Control-Expose-Headers", "Set-Cookie")
+		}
 
 		// Handle preflight requests
 		if r.Method == "OPTIONS" {
@@ -112,6 +123,10 @@ func main() {
 	http.HandleFunc("/quote_swap", corsMiddleware(handleQuoteSwap))
 	http.HandleFunc("/deploy_bytecode", corsMiddleware(handleDeployBytecode))
 	http.HandleFunc("/create_application", corsMiddleware(handleCreateApplication))
+	http.HandleFunc("/auth/github", corsMiddleware(handleGithubAuth))
+	http.HandleFunc("/auth/github/callback", corsMiddleware(handleGithubCallback))
+	http.HandleFunc("/repos", corsMiddleware(handleListRepos))
+	http.HandleFunc("/repo/files", corsMiddleware(handleFetchRepoFiles))
 
 	// Start server
 	port := getEnvOrDefault("PORT", "3001")
@@ -601,6 +616,148 @@ func handleCreateApplication(w http.ResponseWriter, r *http.Request) {
 		"status": "success",
 		"data": map[string]interface{}{
 			"applicationId": applicationID,
+		},
+	})
+}
+
+func handleGithubAuth(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Generate random state for CSRF protection
+	state := solver.GenerateRandomState()
+
+	// Store state in session/cookie
+	http.SetCookie(w, &http.Cookie{
+		Name:     "oauth_state",
+		Value:    state,
+		MaxAge:   3600,
+		HttpOnly: true,
+		Secure:   true,
+		SameSite: http.SameSiteStrictMode,
+	})
+
+	// Redirect to GitHub OAuth
+	authURL := fmt.Sprintf(
+		"https://github.com/login/oauth/authorize?client_id=%s&redirect_uri=%s&state=%s&scope=repo",
+		githubClient.ClientID,
+		githubClient.RedirectURI,
+		state,
+	)
+	http.Redirect(w, r, authURL, http.StatusTemporaryRedirect)
+}
+
+func handleGithubCallback(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Verify state
+	stateCookie, err := r.Cookie("oauth_state")
+	if err != nil {
+		http.Error(w, "Invalid state", http.StatusBadRequest)
+		return
+	}
+
+	if r.URL.Query().Get("state") != stateCookie.Value {
+		http.Error(w, "State mismatch", http.StatusBadRequest)
+		return
+	}
+
+	// Exchange code for access token
+	code := r.URL.Query().Get("code")
+	token, err := githubClient.ExchangeCodeForToken(code)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error exchanging code: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Set token in cookie with correct domain and path
+	cookie := &http.Cookie{
+		Name:     "github_token",
+		Value:    token,
+		Path:     "/",
+		Domain:   "localhost",
+		MaxAge:   3600 * 24,
+		HttpOnly: false,                // Allow JavaScript access
+		Secure:   false,                // Allow non-HTTPS in development
+		SameSite: http.SameSiteLaxMode, // Less strict SameSite policy
+	}
+	http.SetCookie(w, cookie)
+
+	// Redirect to frontend with success parameter
+	http.Redirect(w, r, "http://localhost:3002/?auth=success", http.StatusTemporaryRedirect)
+}
+
+func handleListRepos(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get token from cookie
+	tokenCookie, err := r.Cookie("github_token")
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Fetch repositories
+	repos, err := solver.FetchGithubRepos(tokenCookie.Value)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error fetching repos: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"data": map[string]interface{}{
+			"repositories": repos,
+		},
+	})
+}
+
+func handleFetchRepoFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get token from cookie
+	tokenCookie, err := r.Cookie("github_token")
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Get query parameters
+	owner := r.URL.Query().Get("owner")
+	repo := r.URL.Query().Get("repo")
+	path := r.URL.Query().Get("path")
+
+	if owner == "" || repo == "" {
+		http.Error(w, "owner and repo are required", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch repository contents
+	contents, err := githubClient.FetchRepoContents(tokenCookie.Value, owner, repo, path)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error fetching repo contents: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"data": map[string]interface{}{
+			"contents": contents,
 		},
 	})
 }
