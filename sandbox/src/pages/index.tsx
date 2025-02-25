@@ -137,54 +137,54 @@ export default function Home() {
 
     // folderInput.onchange = async (event) => {
       // const files = (event.target as HTMLIn.putElement).files;
-    //   if (files) {
-    //     for (const [path, { content }] of Object.entries(files)) {
-    //
-    //       console.log(path)
-    //       await sandbox.fs.writeTextFile(path, content);
-    //     }
-    //
-    //     console.log("files uploaded to sandbox")
-    //
-    //     // Listen to setup progress
-    //     sandbox.setup.onSetupProgressUpdate((progress) => {
-    //       console.log(`Setup progress: ${progress.currentStepIndex + 1}/${progress.steps.length}`);
-    //       console.log(`Current step: ${progress.steps[progress.currentStepIndex].name}`);
-    //     });
-    //
-    //     // Get current progress
-    //     const progress = await sandbox.setup.getProgress();
-    //     console.log(`Setup state: ${progress.state}`);
-    //
-    //   // Wait for setup to finish
-    //     const result = await sandbox.setup.waitForFinish();
-    //     if (result.state === "FINISHED") {
-    //       console.log("Setup completed successfully");
-    //     }
-    //
-    //     // Get all tasks
-    //     const tasks = await sandbox.tasks.getTasks();
-    //     // Run all startup tasks
-    //     for (const task of tasks) {
-    //       console.log(`Starting ${task.name}...`);
-    //       sandbox.tasks.runTask(task.id);
-    //     }
-    //
-    // const checkTasksRunning = async () => {
-    //   const tasks = await sandbox.tasks.getTasks();
-    //   const runningTasks = tasks.filter(task => task.state === 'IN_PROGRESS');
-    //
-    //   if (runningTasks.length > 0) {
-    //     console.log(`Currently running tasks: ${runningTasks.map(task => task.name).join(', ')}`);
-    //     setTimeout(checkTasksRunning, 5000); // Check again after 5 seconds
-    //   } else {
-    //     console.log("No tasks are currently running.");
-    //   }
-    // };
-    //
-    // checkTasksRunning();
-    //
-    // };
+      if (files) {
+        for (const [path, { content }] of Object.entries(files)) {
+
+          console.log(path)
+          await sandbox.fs.writeTextFile(path, content);
+        }
+
+        console.log("files uploaded to sandbox")
+
+        // Listen to setup progress
+        sandbox.setup.onSetupProgressUpdate((progress) => {
+          console.log(`Setup progress: ${progress.currentStepIndex + 1}/${progress.steps.length}`);
+          console.log(`Current step: ${progress.steps[progress.currentStepIndex].name}`);
+        });
+
+        // Get current progress
+        const progress = await sandbox.setup.getProgress();
+        console.log(`Setup state: ${progress.state}`);
+
+      // Wait for setup to finish
+        const result = await sandbox.setup.waitForFinish();
+        if (result.state === "FINISHED") {
+          console.log("Setup completed successfully");
+        }
+
+        // Get all tasks
+        const tasks = await sandbox.tasks.getTasks();
+        // Run all startup tasks
+        for (const task of tasks) {
+          console.log(`Starting ${task.name}...`);
+          sandbox.tasks.runTask(task.id);
+        }
+
+    const checkTasksRunning = async () => {
+      const tasks = await sandbox.tasks.getTasks();
+      const runningTasks = tasks.filter(task => task.state === 'IN_PROGRESS');
+
+      if (runningTasks.length > 0) {
+        console.log(`Currently running tasks: ${runningTasks.map(task => task.name).join(', ')}`);
+        setTimeout(checkTasksRunning, 5000); // Check again after 5 seconds
+      } else {
+        console.log("No tasks are currently running.");
+      }
+    };
+
+    checkTasksRunning();
+
+    };
 
     const cargoToml = await sandbox.fs.readFile('./Cargo.toml');
 
@@ -284,9 +284,9 @@ export default function Home() {
       const apiUrl = `https://api.github.com/repos/${owner}/${repo}?ref=${branch}`;
 
       // Recursively fetch files from the given folder
-      // const files = await fetchDirectory(owner, repo, branch);
-      // console.log(files)
-      await pushToCodeSandbox({});
+      const files = await fetchDirectory(owner, repo, branch);
+      console.log(files)
+      await pushToCodeSandbox(files);
 
     } catch (err) {
       setError(err.message);
