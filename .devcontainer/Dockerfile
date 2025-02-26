@@ -21,7 +21,7 @@ ARG target=x86_64-unknown-linux-gnu
 ARG binaries=
 ARG copy=${binaries:+_copy}
 
-FROM rust:1.74-slim-bookworm AS builder
+FROM rust:1.81-slim-bookworm AS builder
 ARG git_commit
 ARG target
 
@@ -29,3 +29,5 @@ RUN apt-get update && apt-get install -y \
     pkg-config \
     protobuf-compiler \
     clang
+
+RUN rustup target add wasm32-unknown-unknown
