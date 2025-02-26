@@ -41,6 +41,15 @@ type GithubContent struct {
 	DownloadURL string `json:"download_url"`
 }
 
+// RepoFile represents a file in the repository with its content
+type RepoFile struct {
+	Path    string `json:"path"`
+	Content string `json:"content"`
+	Type    string `json:"type"`
+	Size    int    `json:"size"`
+	SHA     string `json:"sha"`
+}
+
 func NewGithubClient(clientid, clientSecret, redirectUri string) *GithubAuthConfig {
 	return &GithubAuthConfig{
 		ClientID:     clientid,
@@ -187,4 +196,51 @@ func (c *GithubAuthConfig) FetchFileContent(token, downloadURL string) ([]byte, 
 	}
 
 	return content, nil
+}
+
+// FetchRepoFilesRecursively fetches all files from a repository recursively
+func (c *GithubAuthConfig) FetchRepoFilesRecursively(token, owner, repo string) ([]RepoFile, error) {
+	var allFiles []RepoFile
+
+	// Start with root directory
+	err := c.fetchDirectoryContents(token, owner, repo, "", &allFiles)
+	if err != nil {
+		return nil, fmt.Errorf("error fetching repository contents: %v", err)
+	}
+
+	return allFiles, nil
+}
+
+// fetchDirectoryContents recursively fetches contents of a directory
+func (c *GithubAuthConfig) fetchDirectoryContents(token, owner, repo, path string, files *[]RepoFile) error {
+	contents, err := c.FetchRepoContents(token, owner, repo, path)
+	if err != nil {
+		return err
+	}
+
+	for _, item := range contents {
+		if item.Type == "dir" {
+			// Recursively fetch directory contents
+			err = c.fetchDirectoryContents(token, owner, repo, item.Path, files)
+			if err != nil {
+				return err
+			}
+		} else if item.Type == "file" {
+			// Fetch file content
+			content, err := c.FetchFileContent(token, item.DownloadURL)
+			if err != nil {
+				return err
+			}
+
+			*files = append(*files, RepoFile{
+				Path:    item.Path,
+				Content: string(content),
+				Type:    item.Type,
+				Size:    item.Size,
+				SHA:     item.SHA,
+			})
+		}
+	}
+
+	return nil
 }

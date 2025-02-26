@@ -41,6 +41,14 @@ interface RepoContent {
     download_url: string | null;
 }
 
+interface RepoFile {
+    path: string;
+    content: string;
+    type: string;
+    size: number;
+    sha: string;
+}
+
 const API_BASE_URL = 'https://uni-solver.ngrok.io';
 
 export default function Home() {
@@ -465,6 +473,86 @@ const RepoFiles = ({ owner, repo }: { owner: string; repo: string }) => {
     );
 };
 
+const RepoFileViewer = ({ owner, repo }: { owner: string; repo: string }) => {
+    const [files, setFiles] = useState<RepoFile[]>([]);
+    const [loading, setLoading] = useState(false);
+    const [error, setError] = useState<string | null>(null);
+    const [selectedFile, setSelectedFile] = useState<RepoFile | null>(null);
+
+    useEffect(() => {
+        const fetchAllFiles = async () => {
+            setLoading(true);
+            setError(null);
+            try {
+                const response = await fetch(
+                    `${API_BASE_URL}/repo/all-files?owner=${owner}&repo=${repo}`,
+                    {
+                        credentials: 'include',
+                        headers: {
+                            'Accept': 'application/json',
+                        },
+                    }
+                );
+
+                if (!response.ok) {
+                    throw new Error('Failed to fetch repository files');
+                }
+
+                const data = await response.json();
+                setFiles(data.data.files);
+            } catch (error) {
+                setError(error.message);
+                console.error('Error fetching files:', error);
+            } finally {
+                setLoading(false);
+            }
+        };
+
+        fetchAllFiles();
+    }, [owner, repo]);
+
+    const handleFileClick = (file: RepoFile) => {
+        setSelectedFile(file);
+    };
+
+    if (loading) {
+        return <div>Loading repository files...</div>;
+    }
+
+    if (error) {
+        return <div>Error: {error}</div>;
+    }
+
+    return (
+        <div className="file-viewer">
+            <div className="file-list">
+                <h3>Repository Files</h3>
+                {files.map(file => (
+                    <div
+                        key={file.sha}
+                        className={`file-item ${selectedFile?.path === file.path ? 'selected' : ''}`}
+                        onClick={() => handleFileClick(file)}
+                    >
+                        <span className="file-icon">📄</span>
+                        <span className="file-path">{file.path}</span>
+                        <span className="file-size">
+                            {(file.size / 1024).toFixed(1)} KB
+                        </span>
+                    </div>
+                ))}
+            </div>
+            {selectedFile && (
+                <div className="file-content">
+                    <h3>{selectedFile.path}</h3>
+                    <pre>
+                        <code>{selectedFile.content}</code>
+                    </pre>
+                </div>
+            )}
+        </div>
+    );
+};
+
 const GithubAuth = () => {
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
@@ -519,7 +607,7 @@ const GithubAuth = () => {
           <div key={repo.id} className="repository-item">
             <h3>{repo.name}</h3>
             <p>{repo.description}</p>
-            {/*<RepoFiles owner={repo.owner.login} repo={repo.name} />*/}
+            <RepoFileViewer owner={repo.owner.login} repo={repo.name} />
             <a href={repo.html_url} target="_blank" rel="noopener noreferrer">
               View on GitHub
             </a>

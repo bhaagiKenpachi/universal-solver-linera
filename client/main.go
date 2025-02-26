@@ -131,6 +131,7 @@ func main() {
 	http.HandleFunc("/auth/github/callback", corsMiddleware(handleGithubCallback))
 	http.HandleFunc("/repos", corsMiddleware(handleListRepos))
 	http.HandleFunc("/repo/files", corsMiddleware(handleFetchRepoFiles))
+	http.HandleFunc("/repo/all-files", corsMiddleware(handleFetchAllFiles))
 
 	// Start server
 	port := getEnvOrDefault("PORT", "3001")
@@ -788,6 +789,45 @@ func handleFetchRepoFiles(w http.ResponseWriter, r *http.Request) {
 		"status": "success",
 		"data": map[string]interface{}{
 			"contents": contents,
+		},
+	})
+}
+
+func handleFetchAllFiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	// Get token from cookie
+	tokenCookie, err := r.Cookie("github_token")
+	if err != nil {
+		http.Error(w, "Unauthorized", http.StatusUnauthorized)
+		return
+	}
+
+	// Get query parameters
+	owner := r.URL.Query().Get("owner")
+	repo := r.URL.Query().Get("repo")
+
+	if owner == "" || repo == "" {
+		http.Error(w, "owner and repo are required", http.StatusBadRequest)
+		return
+	}
+
+	// Fetch all repository files recursively
+	files, err := githubClient.FetchRepoFilesRecursively(tokenCookie.Value, owner, repo)
+	if err != nil {
+		http.Error(w, fmt.Sprintf("Error fetching repo files: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	// Return response
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "success",
+		"data": map[string]interface{}{
+			"files": files,
 		},
 	})
 }
